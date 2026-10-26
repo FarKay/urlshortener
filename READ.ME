@@ -1,0 +1,146 @@
+# URL Shortener
+
+A small link shortener written in Go, similar to Bitly. It turns a long web address into a short one that is easier to share.
+
+## What it does
+
+1. You give it a long link, for example `https://go.dev/doc/tutorial/getting-started`.
+2. It creates a short code, like `Qm7pLx`, and remembers which long link the code belongs to.
+3. It gives you back a short link: `http://localhost:4000/Qm7pLx`.
+4. When someone opens the short link, the program looks up the code and sends them to the original long link.
+
+Think of a coat check: you hand over a big coat (the long link) and get a small ticket (the short code). Anyone who shows the ticket gets the coat back. The program is the coat check, and MongoDB is the room where the coats are stored.
+
+## Features
+
+- **Short links:** a random 6-character code is generated for each link.
+- **Custom names:** choose your own code (an alias) such as `golang`.
+- **Click counting:** every visit to a short link adds one to its counter.
+- **Stats:** look up a link's original URL, click count, and creation time.
+- **Delete:** remove a short link you no longer want.
+- **Input checks:** only valid `http` and `https` addresses are accepted, and aliases must be 3-30 letters, digits, `-` or `_`.
+- **Two storage options:** MongoDB (links survive restarts) or in-memory (links are lost when the program stops).
+
+## API
+
+| Method | Route | What it does | Success | Errors |
+|---|---|---|---|---|
+| POST | `/shorten` | Create a short link. Body: `{"url": "https://...", "alias": "optional"}` | 201 with `code` and `short_url` | 400 invalid input, 409 alias taken |
+| GET | `/{code}` | Count a click and redirect to the original URL | 302 redirect | 404 not found |
+| GET | `/stats/{code}` | Show the link's URL, clicks, and creation time | 200 with JSON | 404 not found |
+| DELETE | `/{code}` | Delete the link | 204 no content | 404 not found |
+
+## Project structure
+
+| File | Purpose |
+|---|---|
+| `main.go` | Request handlers, routes, and startup. Chooses which store to use. |
+| `store.go` | The `Link` model and the `Store` interface the handlers depend on. |
+| `memory.go` | In-memory store (a map protected by a mutex). |
+| `mongo.go` | MongoDB store, including a unique index on `code`. |
+
+The handlers only talk to the `Store` interface, so the database can be swapped without changing them.
+
+## Setup
+
+### Requirements
+
+- [Go](https://go.dev/dl/)
+- A MongoDB Atlas cluster (optional; without one the app uses memory)
+
+### Install dependencies
+
+```
+go get github.com/gorilla/mux
+go get go.mongodb.org/mongo-driver/mongo
+go mod tidy
+```
+
+The project uses version 1 of the MongoDB driver, so imports have no `/v2`.
+
+### Configure MongoDB
+
+1. In Atlas, make sure your current IP address is allowed under **Security → Network Access**.
+2. Make sure a database user exists under **Security → Database Access** in the same project as your cluster.
+3. Provide the connection string through the `MONGO_URI` environment variable.
+
+**Option A: set it in the terminal (PowerShell)**
+
+```
+$env:MONGO_URI = "mongodb+srv://<user>:<password>@<cluster-host>/?appName=Cluster0"
+```
+
+**Option B: use a `.env` file**
+
+Create a file named `.env` in the project folder:
+
+```
+MONGO_URI=mongodb+srv://<user>:<password>@<cluster-host>/?appName=Cluster0
+```
+
+This option needs the `godotenv` package and a `godotenv.Load()` call at the start of `main`:
+
+```
+go get github.com/joho/godotenv
+```
+
+**Never commit your password.** Add a `.gitignore` file containing:
+
+```
+# secrets
+.env
+
+# compiled programs
+*.exe
+```
+
+If `MONGO_URI` is not set, the app prints `MONGO_URI not set, using the in-memory store` and keeps links in memory.
+
+## Run
+
+```
+go run .
+```
+
+You should see `Using MongoDB` (or the in-memory message) and `URL shortener running on :4000`.
+
+## Try it (PowerShell)
+
+Create a link with a custom alias:
+
+```
+Invoke-RestMethod -Method Post -Uri http://localhost:4000/shorten -ContentType "application/json" -Body '{"url":"https://go.dev","alias":"golang"}'
+```
+
+Open `http://localhost:4000/golang` in a browser a few times, then check the stats:
+
+```
+Invoke-RestMethod http://localhost:4000/stats/golang
+```
+
+Delete the link:
+
+```
+Invoke-RestMethod -Method Delete -Uri http://localhost:4000/golang
+```
+
+To confirm MongoDB is storing the data, create a link, stop the server with Ctrl+C, start it again, and request the stats. The link should still be there.
+
+## Troubleshooting
+
+| Message | Likely cause |
+|---|---|
+| `server selection timeout` or `tls: internal error` | Your IP is not in the Atlas Network Access list, or the cluster is paused. |
+| `authentication failed` / `bad auth` | Wrong username or password, the user was created in a different Atlas project, a special character in the password needs URL-encoding, or an old `MONGO_URI` is still set in the terminal. |
+| `no such host` | A DNS or internet connection problem. |
+| `could not import ... mongo-driver/mongo` | Run `go get go.mongodb.org/mongo-driver/mongo` and `go mod tidy` in this folder. |
+
+## What this project teaches
+
+- Receiving HTTP requests and sending JSON responses
+- Validating user input and returning proper status codes
+- Storing and reading data in a database
+- Hiding the database behind an interface so it can be swapped
+- Preventing duplicate codes with a unique index
+- Counting clicks safely when many requests arrive at the same time
+- Keeping secrets out of source code with environment variables

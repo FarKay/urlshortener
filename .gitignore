@@ -1,0 +1,5 @@
+# secrets
+.env
+
+# compiled programs
+*.exe
